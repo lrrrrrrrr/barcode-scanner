@@ -57,6 +57,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import org.json.JSONException;
+import java.util.concurrent.ConcurrentHashMap;
 
 @CapacitorPlugin(
     permissions = {
