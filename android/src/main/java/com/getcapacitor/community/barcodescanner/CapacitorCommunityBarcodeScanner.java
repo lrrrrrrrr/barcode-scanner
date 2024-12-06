@@ -81,6 +81,11 @@ public class CapacitorCommunityBarcodeScanner extends Plugin implements ImageAna
 
     private static final String MLKIT_TAG = "MLKIT";
     private Camera mCamera = null;
+    /**
+     * Debounce logic to prevent duplicate QR code detections.
+     */
+    private static final long DEBOUNCE_TIME_MS = 1000; // Debounce time
+    private ConcurrentHashMap<String, Long> detectedCodes = new ConcurrentHashMap<>(); // Store detected codes
     Vibrator mVibrator;
 
     // initilize with Barcode.FORMAT_QR_CODE
@@ -306,65 +311,81 @@ public class CapacitorCommunityBarcodeScanner extends Plugin implements ImageAna
         InputImage inputImage = InputImage.fromMediaImage(mediaImage, image.getImageInfo().getRotationDegrees());
 
         Task<List<Barcode>> result = mScanner
-            .process(inputImage)
-            .addOnSuccessListener(
-                new OnSuccessListener<List<Barcode>>() {
-                    @RequiresApi(api = Build.VERSION_CODES.O)
-                    @Override
-                    public void onSuccess(List<Barcode> barcodes) {
-                        if (scanningPaused) {
-                            return;
-                        }
-                        for (Barcode barcode : barcodes) {
-                            PluginCall call = getSavedCall();
+                .process(inputImage)
+                .addOnSuccessListener(
+                        new OnSuccessListener<List<Barcode>>() {
+                            @RequiresApi(api = Build.VERSION_CODES.O)
+                            @Override
+                            public void onSuccess(List<Barcode> barcodes) {
+                                if (scanningPaused) {
+                                    return;
+                                }
 
-                            Rect bounds = barcode.getBoundingBox();
-                            Point[] corners = barcode.getCornerPoints();
-                            String rawValue = barcode.getRawValue();
+                                for (Barcode barcode : barcodes) {
+                                    PluginCall call = getSavedCall();
 
-                            // add vibration logic here
+                                    Rect bounds = barcode.getBoundingBox();
+                                    Point[] corners = barcode.getCornerPoints();
+                                    String rawValue = barcode.getRawValue();
 
-                            String s = bounds.flattenToString();
-                            Log.e(MLKIT_TAG, "content : " + rawValue);
-                            //                                                    Log.e(MLKIT_TAG,"corners : " + corners.toString());
-                            Log.e(MLKIT_TAG, "bounds : " + bounds.flattenToString());
+                                    // Keep your logs
+                                    String s = bounds.flattenToString();
+                                    Log.e(MLKIT_TAG, "content : " + rawValue);
+                                    Log.e(MLKIT_TAG, "bounds : " + bounds.flattenToString());
+                                    Log.e(MLKIT_TAG, "Added Into ArrayList : " + rawValue);
 
-                            Log.e(MLKIT_TAG, "Added Into ArrayList : " + rawValue);
+                                    if (rawValue != null && !isDebounced(rawValue)) {
+                                        addToDebounce(rawValue); // Add to debounce logic
 
-                            JSObject jsObject = new JSObject();
-                            int[] boundArr = { bounds.top, bounds.bottom, bounds.right, bounds.left };
-                            Log.e(MLKIT_TAG, "onSuccess: boundArr");
-                            jsObject.put("hasContent", true);
-                            jsObject.put("content", rawValue);
-                            jsObject.put("format", null);
-                            //                                                        jsObject.put("corners",corners);
-                            jsObject.put("bounds", s);
+                                        // Keep your existing logic for resolving the result
+                                        JSObject jsObject = new JSObject();
+                                        int[] boundArr = { bounds.top, bounds.bottom, bounds.right, bounds.left };
+                                        jsObject.put("hasContent", true);
+                                        jsObject.put("content", rawValue);
+                                        jsObject.put("format", null);
+                                        jsObject.put("bounds", s);
 
-                            if (call != null && !call.isKeptAlive()) {
-                                destroy();
+                                        if (call != null && !call.isKeptAlive()) {
+                                            destroy();
+                                        }
+                                        call.resolve(jsObject);
+                                    }
+                                }
                             }
-                            call.resolve(jsObject);
                         }
-                    }
-                }
-            )
-            .addOnFailureListener(
-                new OnFailureListener() {
-                    @Override
-                    public void onFailure(@NonNull Exception e) {
-                        Log.e(MLKIT_TAG, e.toString());
-                    }
-                }
-            )
-            .addOnCompleteListener(
-                new OnCompleteListener<List<Barcode>>() {
-                    @Override
-                    public void onComplete(@NonNull Task<List<Barcode>> task) {
-                        image.close();
-                        mediaImage.close();
-                    }
-                }
-            );
+                )
+                .addOnFailureListener(
+                        new OnFailureListener() {
+                            @Override
+                            public void onFailure(@NonNull Exception e) {
+                                Log.e(MLKIT_TAG, e.toString());
+                            }
+                        }
+                )
+                .addOnCompleteListener(
+                        new OnCompleteListener<List<Barcode>>() {
+                            @Override
+                            public void onComplete(@NonNull Task<List<Barcode>> task) {
+                                image.close();
+                                mediaImage.close();
+                            }
+                        }
+                );
+    }
+
+    private boolean isDebounced(String code) {
+        long currentTime = System.currentTimeMillis();
+        if (detectedCodes.containsKey(code)) {
+            long lastDetectedTime = detectedCodes.get(code);
+            if ((currentTime - lastDetectedTime) < DEBOUNCE_TIME_MS) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void addToDebounce(String code) {
+        detectedCodes.put(code, System.currentTimeMillis());
     }
 
     @PluginMethod
